@@ -1,0 +1,1 @@
+python3 ./demo/main/video/sot_video.py --config 'experiments/siamfcpp/test/vot/siamfcpp_alexnet.yaml' --device cuda --video test_images/polo/*.jpg --output test_images/polo_output
