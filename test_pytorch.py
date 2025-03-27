@@ -531,12 +531,12 @@ def convertToONNX_searchV3(model):
     output_names = ["score", "bbox"]
     dummy_search = torch.randint(0, 256, 
             (1, 3, FAKE_SEARCH_INPUT_SIZE, FAKE_SEARCH_INPUT_SIZE)).to(torch.float32).cuda()
-    dummy_c_z_k = torch.randn(1, 256, 4, 4).cuda()
-    dummy_r_z_k = torch.randn(1, 256, 4, 4).cuda()
+    dummy_c_z_k = torch.randn(1, 256, 4, 4).to(torch.float16).cuda()
+    dummy_r_z_k = torch.randn(1, 256, 4, 4).to(torch.float16).cuda()
     torch.onnx.export(
         template_embedding,
         (dummy_search, dummy_c_z_k, dummy_r_z_k),
-        "./onnx/direct/siamfcpp_search_direct_aipp.onnx",
+        "./onnx/direct/siamfcpp_search_direct_aipp_half.onnx",
         export_params=True,
         opset_version=12,
         input_names=input_names,

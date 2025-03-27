@@ -1,5 +1,6 @@
 from pathlib import Path
 import time
+import shutil
 
 import numpy as np
 import onnxruntime as ort
@@ -15,20 +16,20 @@ SEARCH_INPUT_SIZE = 303
 FAKE_TEMPLATE_INPUT_SIZE = 128  # (127 // 16 + 1)
 FAKE_SEARCH_INPUT_SIZE = 304  # (303 // 16 + 1)
 MODEL_OUTPUT_SIZE = 17
-INIT_BOX = (40, 30, 60, 80)   # x, y, w, h
+# INIT_BOX = (40, 30, 60, 80)   # x, y, w, h
+INIT_BOX = (229, 95, 360-229, 212-95)   # x, y, w, h
 # INIT_BOX = (670, 234, 145, 113)
 # INIT_BOX = (554, 257, 24, 11)
 
 # test data(images)
-IMAGE_DIR = Path("/home/tengjunwan/project/ObjectTracking/SiamFC++/video_analyst-master/test_images/mario_pipes")
+IMAGE_DIR = Path("/home/tengjunwan/project/ObjectTracking/SiamFC++/video_analyst-master/test_images/balloon")
 IMAGE_PATHS = sorted(list(IMAGE_DIR.glob("*.png")))
-VIS_SAVE_DIR = Path("/home/tengjunwan/project/ObjectTracking/SiamFC++/video_analyst-master/test_images/mario_pipes_output")
+VIS_SAVE_DIR = Path("/home/tengjunwan/project/ObjectTracking/SiamFC++/video_analyst-master/test_images/balloon_output")
 DEBUG_SAVE_DIR = Path("/home/tengjunwan/project/ObjectTracking/SiamFC++/video_analyst-master/test_images/tmp")
-DEBUG_FLAG = False
+DEBUG_FLAG = True
 USE_KALMAN_FILTER = True
 
 # hyper params 
-# search_area_factor = 4.0
 CONTEXT_AMOUNT = 0.5
 penalty_k = 0.08
 window = np.outer(np.hanning(MODEL_OUTPUT_SIZE), np.hanning(MODEL_OUTPUT_SIZE)).flatten()  # (289=17*17,) 
@@ -36,6 +37,12 @@ window_influence = 0.2
 test_lr = 0.58
 SCORE_THRESH = 0.5
 
+
+if DEBUG_FLAG:
+    if DEBUG_SAVE_DIR.exists() and DEBUG_SAVE_DIR.is_dir():
+        shutil.rmtree(DEBUG_SAVE_DIR)  # Delete the entire folder and contents
+
+    DEBUG_SAVE_DIR.mkdir(parents=True, exist_ok=True)  # Recreate empty folder
 
 
 
