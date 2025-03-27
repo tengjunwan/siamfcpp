@@ -27,7 +27,7 @@ IMAGE_PATHS = sorted(list(IMAGE_DIR.glob("*.png")))
 VIS_SAVE_DIR = Path("/home/tengjunwan/project/ObjectTracking/SiamFC++/video_analyst-master/test_images/balloon_output")
 DEBUG_SAVE_DIR = Path("/home/tengjunwan/project/ObjectTracking/SiamFC++/video_analyst-master/test_images/tmp")
 DEBUG_FLAG = True
-USE_KALMAN_FILTER = True
+USE_KALMAN_FILTER = False
 
 # hyper params 
 CONTEXT_AMOUNT = 0.5
@@ -38,13 +38,21 @@ test_lr = 0.58
 SCORE_THRESH = 0.5
 
 
-if DEBUG_FLAG:
-    if DEBUG_SAVE_DIR.exists() and DEBUG_SAVE_DIR.is_dir():
-        shutil.rmtree(DEBUG_SAVE_DIR)  # Delete the entire folder and contents
+# state used in stmtrack_tracker
+state = {"cx": 0,
+         "cy": 0,
+         "w": 0,
+         "h": 0,
+         "scale": 1.0,
+         "score": 1.0}
 
-    DEBUG_SAVE_DIR.mkdir(parents=True, exist_ok=True)  # Recreate empty folder
 
 
+def empty_folder(folder):
+    if folder.exists() and folder.is_dir():
+        shutil.rmtree(folder)  # Delete the entire folder and contents
+
+    folder.mkdir(parents=True, exist_ok=True)  # Recreate empty folder
 
 def get_measure_std_by_score(score):
     # higher score, lower measure_std
@@ -59,17 +67,6 @@ def get_measure_std_by_score(score):
 
     return meas_std
 
-    
-
-
-
-# state used in stmtrack_tracker
-state = {"cx": 0,
-         "cy": 0,
-         "w": 0,
-         "h": 0,
-         "scale": 1.0,
-         "score": 1.0}
 
 
 
@@ -77,11 +74,13 @@ def next_multiple_of_16(x):
     return (x // 16 + 1) *  16
 
 
-def get_template_crop(state, context_amount):
-    w, h = state["w"], state["h"]
-    wc = w + context_amount * (w + h)
-    hc = h + context_amount * (w + h)
-    size_template_crop = np.sqrt(wc * hc)
+def nearest_multiple_of_16(x):
+    return max(round(x / 16) * 16, 16)
+
+
+
+def get_template_crop(state):
+    size_template_crop = get_size_template_crop(state)
     # # maybe it must be multiples of 16
     size_template_crop = next_multiple_of_16(size_template_crop)
     state["scale"] = size_template_crop / TEMPLATE_INPUT_SIZE  
@@ -93,11 +92,8 @@ def get_template_crop(state, context_amount):
     return [crop_x, crop_y, crop_w, crop_h]
 
 
-def get_search_crop(state, context_amount):
-    w, h = state["w"], state["h"]
-    wc = w + context_amount * (w + h)
-    hc = h + context_amount * (w + h)
-    size_template_crop = np.sqrt(wc * hc) 
+def get_search_crop(state):
+    size_template_crop = get_size_template_crop(state)
     state["scale"] = size_template_crop / TEMPLATE_INPUT_SIZE  
     size_search_crop = SEARCH_INPUT_SIZE * state["scale"]
     # maybe it must be multiples of 16
@@ -108,6 +104,15 @@ def get_search_crop(state, context_amount):
     crop_w = int(size_search_crop)
     crop_h = int(size_search_crop)
     return [crop_x, crop_y, crop_w, crop_h]
+
+
+def get_size_template_crop(state):
+    w, h = state["w"], state["h"]
+    wc = w + CONTEXT_AMOUNT * (w + h)
+    hc = h + CONTEXT_AMOUNT * (w + h)
+    size_template_crop = np.sqrt(wc * hc) 
+    return size_template_crop
+
 
 
 def safe_crop(image, crop):
@@ -192,10 +197,38 @@ def check_consistency_of_KF(kf_a, kf_b):
     return consistency
 
 
+def get_resized_frame(state, frame):
+    # resize frame to the scale of model input
+    size_template_crop = get_size_template_crop(state)
+    scale = size_template_crop / TEMPLATE_INPUT_SIZE 
+    state["scale"] = scale
+    orgin_h, orgin_w = frame.shape[:2]
+    resize_h = int(orgin_h / scale)
+    resize_w = int(orgin_w / scale)
+    # maybe it must be multiples of 16
+    # resize_h = int(nearest_multiple_of_16(resize_h)) 
+    # resize_w = int(nearest_multiple_of_16(resize_w))
+    resized_frame = cv2.resize(frame, (resize_w, resize_h))
+    return resized_frame
+
+
+def get_resized_search_crop(state):
+    cx = state["cx"] / state["scale"]
+    cy = state["cy"] / state["scale"]
+    crop_x = int(cx - FAKE_SEARCH_INPUT_SIZE * 0.5)
+    crop_y = int(cy - FAKE_SEARCH_INPUT_SIZE * 0.5)
+    crop_w = int(FAKE_SEARCH_INPUT_SIZE)
+    crop_h = int(FAKE_SEARCH_INPUT_SIZE)
+
+    return [crop_x, crop_y, crop_w, crop_h]
 
 
 
 def run_onnx(template_session, search_session):
+    empty_folder(VIS_SAVE_DIR)
+    if DEBUG_FLAG:
+        empty_folder(DEBUG_SAVE_DIR)
+
     # ====part 0: crop resize and preprocess====
     # init setting(only called once)
     init_frame = cv2.imread(str(IMAGE_PATHS[0]))
@@ -216,11 +249,9 @@ def run_onnx(template_session, search_session):
     else:
         kf = None
     
-    template_crop = get_template_crop(state, context_amount=CONTEXT_AMOUNT)  # expand crop area according to bbox
+    template_crop = get_template_crop(state)  # expand crop area according to bbox
     template_image = safe_crop(init_frame, template_crop)  # actual crop 
-    
-    # template image resize
-    template_image_resize = resize(template_image, FAKE_TEMPLATE_INPUT_SIZE)
+    template_image_resize = resize(template_image, FAKE_TEMPLATE_INPUT_SIZE) # template image resize
     if DEBUG_FLAG:
         cv2.imwrite(str(DEBUG_SAVE_DIR / IMAGE_PATHS[0].name), template_image_resize)
 
@@ -252,10 +283,21 @@ def run_onnx(template_session, search_session):
 
         img_start = time.time()  # Start time for this image
         frame = cv2.imread(str(IMAGE_PATHS[i]))
-
-        search_crop = get_search_crop(state, context_amount=CONTEXT_AMOUNT)
-        search_image = safe_crop(frame, search_crop)
-        search_image_resize = resize(search_image, FAKE_SEARCH_INPUT_SIZE)
+        
+        size_template_crop = get_size_template_crop(state)
+        # target_too_big = size_template_crop > 256
+        target_too_big = False
+        if not target_too_big:
+            # strategy: crop first then resize
+            search_crop = get_search_crop(state)
+            search_image = safe_crop(frame, search_crop)
+            search_image_resize = resize(search_image, FAKE_SEARCH_INPUT_SIZE)
+        else:
+            # strategy: resize first then crop
+            resized_frame = get_resized_frame(state, frame)
+            resized_search_crop = get_resized_search_crop(state)
+            search_image_resize = safe_crop(resized_frame, resized_search_crop)
+            
 
         if DEBUG_FLAG:
             cv2.imwrite(str(DEBUG_SAVE_DIR / IMAGE_PATHS[i].name), search_image_resize)
@@ -384,10 +426,16 @@ def run_onnx(template_session, search_session):
                         cv2.FONT_HERSHEY_COMPLEX_SMALL, 2,
                         (0, 0, 255), thickness=3)
         # search box
+        if target_too_big:
+            search_crop[0] = resized_search_crop[0] * state["scale"]
+            search_crop[1] = resized_search_crop[1] * state["scale"]
+            search_crop[2] = resized_search_crop[2] * state["scale"]
+            search_crop[3] = resized_search_crop[3] * state["scale"]
         cv2.rectangle(frame_disp, 
                 (int(search_crop[0]), int(search_crop[1])),
                 (int(search_crop[0] + search_crop[2]), int(search_crop[1] + search_crop[3])), 
                 (123, 0, 123), thickness=2)
+       
             
         if kf is not None:
             cv2.circle(frame_disp, (int(kf_pred_cx), int(kf_pred_cy)), 5, (255, 0, 0), -1)  # blue dot
